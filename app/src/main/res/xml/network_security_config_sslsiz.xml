@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  YALNIZCA DENEME: sunucuda SSL kurulana kadar kavissoft.com ve alt alan adlarına şifresiz (http) bağlantıya izin verir.
+  SSL kurulunca depodaki SSLSIZ_DENEME dosyası 0 yapılır ve bu dosya kullanılmaz.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="@raw/ca_isrg_x1" />
+            <certificates src="@raw/ca_isrg_x2" />
+            <certificates src="@raw/ca_usertrust_rsa" />
+            <certificates src="@raw/ca_usertrust_ecc" />
+            <certificates src="@raw/ca_sectigo_r46" />
+            <certificates src="@raw/ca_sectigo_e46" />
+            <certificates src="@raw/ca_comodo_rsa" />
+            <certificates src="@raw/ca_comodo_ecc" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">kavissoft.com</domain>
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,105 @@
+name: APK derle
+
+# Her kod gönderiminde ya da elle başlatıldığında APK derlenir ve "Releases" bölümüne eklenir.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  derle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # İmza anahtarı yalnızca GitHub "Secrets" kasasında durur; depoya ve derleme kayıtlarına yazılmaz.
+      IMZA_ANAHTARI: ${{ secrets.IMZA_ANAHTARI }}
+      IMZA_PAROLA: ${{ secrets.IMZA_PAROLASI }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Sürüm numarası
+        run: |
+          echo "SURUM_AD=$(cat SURUM | tr -d '[:space:]')" >> "$GITHUB_ENV"
+          echo "SURUM_KOD=${{ github.run_number }}" >> "$GITHUB_ENV"
+
+      - name: İmza anahtarını hazırla
+        run: |
+          if [ -n "$IMZA_ANAHTARI" ]; then
+            # Yapıştırırken araya giren boşluk / satır sonları temizlenir; iki değer yer değiştirmişse de tanınır
+            A=$(printf '%s' "$IMZA_ANAHTARI" | tr -d '[:space:]')
+            P=$(printf '%s' "$IMZA_PAROLA" | tr -d '[:space:]')
+            if [ ${#A} -lt ${#P} ]; then T="$A"; A="$P"; P="$T"; fi
+            printf '%s' "$A" | base64 -d -i > "$RUNNER_TEMP/imza.jks" 2>/dev/null || true
+            if ! keytool -list -keystore "$RUNNER_TEMP/imza.jks" -storepass "$P" -alias servismasasi > /dev/null 2>&1; then
+              # Yalnızca uzunluklar yazılır (değerlerin kendisi hiçbir yere yazılmaz)
+              echo "İmza anahtarı açılamadı. IMZA_ANAHTARI uzunluğu: ${#A} (olması gereken 5768), IMZA_PAROLASI uzunluğu: ${#P} (olması gereken 32), çözülen dosya: $(stat -c %s "$RUNNER_TEMP/imza.jks" 2>/dev/null || echo 0) bayt (olması gereken 4324)." > "$RUNNER_TEMP/derleme.txt"
+              exit 1
+            fi
+            echo "::add-mask::$P"
+            echo "IMZA_PAROLA=$P" >> "$GITHUB_ENV"
+            echo "IMZA_TURU=yayin" >> "$GITHUB_ENV"
+          else
+            # Kalıcı anahtar tanımlı değil: yalnızca deneme amaçlı, bu derlemeye özel geçici anahtar üretilir
+            IMZA_PAROLA=$(openssl rand -hex 16)
+            echo "::add-mask::$IMZA_PAROLA"
+            echo "IMZA_PAROLA=$IMZA_PAROLA" >> "$GITHUB_ENV"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/imza.jks" -storetype JKS -storepass "$IMZA_PAROLA" -keypass "$IMZA_PAROLA" \
+              -alias servismasasi -keyalg RSA -keysize 2048 -validity 30 -dname "CN=Servis Masasi Deneme"
+            echo "IMZA_TURU=deneme" >> "$GITHUB_ENV"
+          fi
+          echo "IMZA_DOSYA=$RUNNER_TEMP/imza.jks" >> "$GITHUB_ENV"
+
+      - name: İmza özeti
+        run: |
+          OZET=$(keytool -list -v -keystore "$IMZA_DOSYA" -storepass "$IMZA_PAROLA" -alias servismasasi | grep 'SHA256:' | head -1 | sed 's/.*SHA256: *//' | tr -d ':[:space:]')
+          echo "IMZA_OZET=$OZET" >> "$GITHUB_ENV"
+
+      - name: Derle
+        run: set -o pipefail; gradle --no-daemon :app:assembleRelease -PsurumAd="$SURUM_AD" -PsurumKod="$SURUM_KOD" -PimzaOzet="$IMZA_OZET" -Psslsiz="$(cat SSLSIZ_DENEME 2>/dev/null | tr -d '[:space:]')" 2>&1 | tee "$RUNNER_TEMP/derleme.txt"
+
+      - name: Derleme hatalarını kaydet
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Hata satırları, depoya özel (gizli) bir işleme notu olarak kaydedilir; anahtar ya da parola içermez
+          touch "$RUNNER_TEMP/derleme.txt"
+          HATA=$(grep -E "^e: |error:|What went wrong|FAILED|İmza anahtarı" "$RUNNER_TEMP/derleme.txt" | sed "s#file://$GITHUB_WORKSPACE/##" | head -60 || true)
+          [ -z "$HATA" ] && HATA=$(tail -40 "$RUNNER_TEMP/derleme.txt")
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -f body="Derleme hatası:
+          $HATA" > /dev/null || true
+
+      - name: APK'yı yayınla
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          AD="servismasasi-$SURUM_AD-$SURUM_KOD"
+          [ "$IMZA_TURU" = "deneme" ] && AD="$AD-deneme"
+          [ "$(cat SSLSIZ_DENEME 2>/dev/null | tr -d '[:space:]')" = "1" ] && AD="$AD-sslsiz"
+          cp app/build/outputs/apk/release/app-release.apk "$AD.apk"
+          sha256sum "$AD.apk" > "$AD.sha256"
+          NOT="Sürüm $SURUM_AD (derleme $SURUM_KOD)."
+          [ "$(cat SSLSIZ_DENEME 2>/dev/null | tr -d '[:space:]')" = "1" ] && NOT="$NOT DİKKAT: şifresiz (SSL'siz) deneme sürümü; müşterilere dağıtmayın."
+          [ "$IMZA_TURU" = "deneme" ] && NOT="$NOT Deneme imzalı: kalıcı imza anahtarı tanımlanana kadar her yeni APK'dan önce eskisini telefondan kaldırın."
+          gh release create "v$SURUM_AD-$SURUM_KOD" "$AD.apk" "$AD.sha256" --title "Servis Masası $SURUM_AD ($SURUM_KOD)" --notes "$NOT" --target "$GITHUB_SHA"
+
+      - name: Geçici dosyaları sil
+        if: always()
+        run: rm -f "$RUNNER_TEMP/imza.jks"

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Yalnızca şifreli (HTTPS) bağlantı. Uygulama, telefonda yüklü bütün sertifika kurumlarına değil,
+  yalnızca aşağıdaki kök sertifikalara güvenir (Let's Encrypt ve Sectigo: cPanel AutoSSL'in kullandığı kurumlar).
+  Telefona sonradan yüklenen sertifikalar (araya girip dinleme araçları) kabul edilmez.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="@raw/ca_isrg_x1" />
+            <certificates src="@raw/ca_isrg_x2" />
+            <certificates src="@raw/ca_usertrust_rsa" />
+            <certificates src="@raw/ca_usertrust_ecc" />
+            <certificates src="@raw/ca_sectigo_r46" />
+            <certificates src="@raw/ca_sectigo_e46" />
+            <certificates src="@raw/ca_comodo_rsa" />
+            <certificates src="@raw/ca_comodo_ecc" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
