@@ -37,7 +37,9 @@ jobs:
       - name: Sürüm numarası
         run: |
           echo "SURUM_AD=$(cat SURUM | tr -d '[:space:]')" >> "$GITHUB_ENV"
-          echo "SURUM_KOD=${{ github.run_number }}" >> "$GITHUB_ENV"
+          # Sürüm kodu: 1 Ocak 2025'ten bu yana geçen dakika. Her derlemede büyür ve depo yeniden açılsa da
+          # sıfırlanmaz (derleme sayacı sıfırlanınca yeni APK eskisinden "küçük" görünüp kurulamıyordu).
+          echo "SURUM_KOD=$(( ($(date -u +%s) - 1735689600) / 60 ))" >> "$GITHUB_ENV"
 
       - name: İmza anahtarını hazırla
         run: |
@@ -49,14 +51,20 @@ jobs:
             printf '%s' "$A" | base64 -d -i > "$RUNNER_TEMP/imza.jks" 2>/dev/null || true
             if ! keytool -list -keystore "$RUNNER_TEMP/imza.jks" -storepass "$P" -alias servismasasi > /dev/null 2>&1; then
               # Yalnızca uzunluklar yazılır (değerlerin kendisi hiçbir yere yazılmaz)
-              echo "İmza anahtarı açılamadı. IMZA_ANAHTARI uzunluğu: ${#A} (olması gereken 5768), IMZA_PAROLASI uzunluğu: ${#P} (olması gereken 32), çözülen dosya: $(stat -c %s "$RUNNER_TEMP/imza.jks" 2>/dev/null || echo 0) bayt (olması gereken 4324)." > "$RUNNER_TEMP/derleme.txt"
+              echo "İmza anahtarı açılamadı. IMZA_ANAHTARI uzunluğu: ${#A} (olması gereken 2868), IMZA_PAROLASI uzunluğu: ${#P} (olması gereken 32), çözülen dosya: $(stat -c %s "$RUNNER_TEMP/imza.jks" 2>/dev/null || echo 0) bayt (olması gereken 2151)." > "$RUNNER_TEMP/derleme.txt"
               exit 1
             fi
             echo "::add-mask::$P"
             echo "IMZA_PAROLA=$P" >> "$GITHUB_ENV"
             echo "IMZA_TURU=yayin" >> "$GITHUB_ENV"
+          elif [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            # Kalıcı anahtar yoksa otomatik derleme durur: geçici anahtarla imzalanan APK telefonlarda
+            # güncelleme olarak kurulamaz ("imza farklı olabilir" hatası).
+            echo "Kalıcı imza anahtarı tanımlı değil (IMZA_ANAHTARI / IMZA_PAROLASI Secrets). APK yayınlanmadı. Deneme APK'sı için derlemeyi Actions sekmesinden elle başlatın." > "$RUNNER_TEMP/derleme.txt"
+            cat "$RUNNER_TEMP/derleme.txt"
+            exit 1
           else
-            # Kalıcı anahtar tanımlı değil: yalnızca deneme amaçlı, bu derlemeye özel geçici anahtar üretilir
+            # Elle başlatılan deneme derlemesi: bu derlemeye özel geçici anahtar üretilir
             IMZA_PAROLA=$(openssl rand -hex 16)
             echo "::add-mask::$IMZA_PAROLA"
             echo "IMZA_PAROLA=$IMZA_PAROLA" >> "$GITHUB_ENV"

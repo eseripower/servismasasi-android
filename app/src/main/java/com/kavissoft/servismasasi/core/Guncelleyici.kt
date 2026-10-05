@@ -95,8 +95,19 @@ class KurulumAlici : BroadcastReceiver() {
             PackageInstaller.STATUS_SUCCESS -> Guncelleyici.sonuc("")
             PackageInstaller.STATUS_FAILURE_ABORTED -> Guncelleyici.sonuc("Güncelleme iptal edildi.")
             PackageInstaller.STATUS_FAILURE_STORAGE -> Guncelleyici.sonuc("Telefonda yeterli boş alan yok.")
-            PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE, PackageInstaller.STATUS_FAILURE_INVALID ->
-                Guncelleyici.sonuc("Yeni sürüm bu uygulamayla uyumlu değil (imza farklı olabilir). Uygulamayı kaldırıp yeniden kurun.")
+            PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE, PackageInstaller.STATUS_FAILURE_INVALID -> {
+                // Android'in ayrıntılı nedeni (ör. INSTALL_FAILED_UPDATE_INCOMPATIBLE, INSTALL_FAILED_VERSION_DOWNGRADE)
+                val ayrinti = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
+                Guncelleyici.sonuc(
+                    when {
+                        ayrinti.contains("DOWNGRADE", ignoreCase = true) ->
+                            "Sunucudaki sürüm, telefondaki sürümden eski görünüyor (sürüm kodu düşük). Firmanızın yeni bir sürüm yayınlaması gerekiyor."
+                        ayrinti.contains("UPDATE_INCOMPATIBLE", ignoreCase = true) || ayrinti.contains("signature", ignoreCase = true) ->
+                            "Yeni sürüm farklı bir imza anahtarıyla imzalanmış. Uygulamayı bir kez kaldırıp yeniden kurun; sonraki güncellemeler kendiliğinden kurulur."
+                        else -> "Yeni sürüm kurulamadı" + (if (ayrinti.isNotBlank()) " ($ayrinti)." else ".") + " Uygulamayı kaldırıp yeniden kurun."
+                    }
+                )
+            }
             else -> Guncelleyici.sonuc("Güncelleme kurulamadı.")
         }
     }
